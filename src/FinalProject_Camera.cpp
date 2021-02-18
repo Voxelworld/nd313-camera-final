@@ -11,9 +11,12 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
 #include <opencv2/features2d.hpp>
+#ifndef _MSC_VER
 #include <opencv2/xfeatures2d.hpp>
 #include <opencv2/xfeatures2d/nonfree.hpp>
+#endif
 
+// project parts:
 #include "dataStructures.h"
 #include "matching2D.hpp"
 #include "objectDetection2D.hpp"
@@ -21,6 +24,15 @@
 #include "camFusion.hpp"
 
 using namespace std;
+
+// Implemented detector and descriptor types
+#ifndef _MSC_VER
+static array<string, 7> detectorTypes{"SHITOMASI", "HARRIS", "FAST", "BRISK", "ORB", "AKAZE", "SIFT"};
+static array<string, 6> descriptorTypes{"BRISK", "BRIEF", "ORB", "FREAK", "AKAZE", "SIFT"};
+#else
+static array<string, 6> detectorTypes{"SHITOMASI", "HARRIS", "FAST", "BRISK", "ORB", "AKAZE"};
+static array<string, 3> descriptorTypes{"BRISK", "ORB", "AKAZE"};
+#endif
 
 /* MAIN PROGRAM */
 int main(int argc, const char *argv[])
@@ -39,7 +51,7 @@ int main(int argc, const char *argv[])
     int imgStepWidth = 1; 
     int imgFillWidth = 4;  // no. of digits which make up the file index (e.g. img-0001.png)
 
-    // object detection
+    // YOLO object detection
     string yoloBasePath = dataPath + "dat/yolo/";
     string yoloClassesFile = yoloBasePath + "coco.names";
     string yoloModelConfiguration = yoloBasePath + "yolov3.cfg";
@@ -98,13 +110,13 @@ int main(int argc, const char *argv[])
 
         /* DETECT & CLASSIFY OBJECTS */
 
-        float confThreshold = 0.2;
-        float nmsThreshold = 0.4;        
+        float confThreshold = 0.2f;
+        float nmsThreshold = 0.4f;        
         detectObjects((dataBuffer.end() - 1)->cameraImg, (dataBuffer.end() - 1)->boundingBoxes, confThreshold, nmsThreshold,
                       yoloBasePath, yoloClassesFile, yoloModelConfiguration, yoloModelWeights, bVis);
 
         cout << "#2 : DETECT & CLASSIFY OBJECTS done" << endl;
-
+        // Now the data buffer is filled with `boundingBoxes` of YOLO.
 
         /* CROP LIDAR POINTS */
 
@@ -113,19 +125,20 @@ int main(int argc, const char *argv[])
         std::vector<LidarPoint> lidarPoints;
         loadLidarFromFile(lidarPoints, lidarFullFilename);
 
-        // remove Lidar points based on distance properties
-        float minZ = -1.5, maxZ = -0.9, minX = 2.0, maxX = 20.0, maxY = 2.0, minR = 0.1; // focus on ego lane
+        // remove Lidar points based on distance properties, including road surface (Z -1.5)
+        float minZ = -1.5f, maxZ = -0.9f, minX = 2.0f, maxX = 20.0f, maxY = 2.0f, minR = 0.1f; // focus on ego lane
         cropLidarPoints(lidarPoints, minX, maxX, maxY, minZ, maxZ, minR);
     
         (dataBuffer.end() - 1)->lidarPoints = lidarPoints;
 
         cout << "#3 : CROP LIDAR POINTS done" << endl;
+        // Now the data buffer is filled with the `lidarPoints` cropped to the ego lane
 
 
         /* CLUSTER LIDAR POINT CLOUD */
 
         // associate Lidar points with camera-based ROI
-        float shrinkFactor = 0.10; // shrinks each bounding box by the given percentage to avoid 3D object merging at the edges of an ROI
+        float shrinkFactor = 0.10f; // shrinks each bounding box by the given percentage to avoid 3D object merging at the edges of an ROI
         clusterLidarWithROI((dataBuffer.end()-1)->boundingBoxes, (dataBuffer.end() - 1)->lidarPoints, shrinkFactor, P_rect_00, R_rect_00, RT);
 
         // Visualize 3D objects
@@ -152,13 +165,20 @@ int main(int argc, const char *argv[])
         vector<cv::KeyPoint> keypoints; // create empty feature list for current image
         string detectorType = "SHITOMASI";
 
-        if (detectorType.compare("SHITOMASI") == 0)
+        //// TASK MP.2 -> add the following keypoint detectors in file matching2D.cpp and enable string-based selection based on detectorType
+        //// -> HARRIS, FAST, BRISK, ORB, AKAZE, SIFT
+        if (detectorType == "SHITOMASI") // 1996
         {
             detKeypointsShiTomasi(keypoints, imgGray, false);
         }
+        else if (detectorType == "HARRIS") // 1988
+        {
+            detKeypointsHarris(keypoints, imgGray, false);
+        }
         else
         {
-            //...
+            // FAST (2006), BRISK (2011), ORB (2011), AKAZE (2012), SIFT (1999)
+            detKeypointsModern(keypoints, imgGray, detectorType, false);
         }
 
         // optional : limit number of keypoints (helpful for debugging and learning)
@@ -197,11 +217,25 @@ int main(int argc, const char *argv[])
         {
 
             /* MATCH KEYPOINT DESCRIPTORS */
+            // TASK MP.8: use the BF approach with the descriptor distance ratio set to 0.8.
 
             vector<cv::DMatch> matches;
-            string matcherType = "MAT_BF";        // MAT_BF, MAT_FLANN
-            string descriptorType = "DES_BINARY"; // DES_BINARY, DES_HOG
-            string selectorType = "SEL_NN";       // SEL_NN, SEL_KNN
+            string matcherTypes[]{"MAT_BF", "MAT_FLANN"};
+            string matcherType = matcherTypes[0]; // MAT_BF, MAT_FLANN
+
+            // Auto select class of descriptor
+            // DES_BINARY: binary descriptors: BRIEF, BRISK, ORB, FREAK, and KAZE
+            // DES_HOG: histogram based descriptors: SIFT, SURF
+            string descriptorClass = "DES_BINARY";
+            if (descriptorType == "SIFT" || descriptorType == "SURF")
+                descriptorClass = "DES_HOG";
+
+            string selectorTypes[]{"SEL_NN", "SEL_KNN"};
+            string selectorType = selectorTypes[1]; // SEL_NN, SEL_KNN
+
+            //// STUDENT ASSIGNMENT
+            //// TASK MP.5 -> add FLANN matching in file matching2D.cpp
+            //// TASK MP.6 -> add KNN match selection and perform descriptor distance ratio filtering with t=0.8 in file matching2D.cpp
 
             matchDescriptors((dataBuffer.end() - 2)->keypoints, (dataBuffer.end() - 1)->keypoints,
                              (dataBuffer.end() - 2)->descriptors, (dataBuffer.end() - 1)->descriptors,
@@ -215,7 +249,7 @@ int main(int argc, const char *argv[])
             
             /* TRACK 3D OBJECT BOUNDING BOXES */
 
-            //// STUDENT ASSIGNMENT
+            //// TODO: STUDENT ASSIGNMENT
             //// TASK FP.1 -> match list of 3D objects (vector<BoundingBox>) between current and previous frame (implement ->matchBoundingBoxes)
             map<int, int> bbBestMatches;
             matchBoundingBoxes(matches, bbBestMatches, *(dataBuffer.end()-2), *(dataBuffer.end()-1)); // associate bounding boxes between current and previous frame using keypoint matches
@@ -250,16 +284,17 @@ int main(int argc, const char *argv[])
                     }
                 }
 
+                // Now we have the points `currBB` and `prevBB` to matching bounding boxes.
                 // compute TTC for current match
                 if( currBB->lidarPoints.size()>0 && prevBB->lidarPoints.size()>0 ) // only compute TTC if we have Lidar points
                 {
-                    //// STUDENT ASSIGNMENT
+                    //// TODO: STUDENT ASSIGNMENT
                     //// TASK FP.2 -> compute time-to-collision based on Lidar data (implement -> computeTTCLidar)
                     double ttcLidar; 
                     computeTTCLidar(prevBB->lidarPoints, currBB->lidarPoints, sensorFrameRate, ttcLidar);
                     //// EOF STUDENT ASSIGNMENT
 
-                    //// STUDENT ASSIGNMENT
+                    //// TODO: STUDENT ASSIGNMENT
                     //// TASK FP.3 -> assign enclosed keypoint matches to bounding box (implement -> clusterKptMatchesWithROI)
                     //// TASK FP.4 -> compute time-to-collision based on camera (implement -> computeTTCCamera)
                     double ttcCamera;
