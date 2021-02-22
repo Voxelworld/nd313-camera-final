@@ -47,7 +47,7 @@ int main(int argc, const char *argv[])
     string imgPrefix = "KITTI/2011_09_26/image_02/data/000000"; // left camera, color
     string imgFileType = ".png";
     int imgStartIndex = 0; // first file index to load (assumes Lidar and camera names have identical naming convention)
-    int imgEndIndex = 18;   // last file index to load
+    int imgEndIndex = 77; //18; // last file index to load (0-77)
     int imgStepWidth = 1; 
     int imgFillWidth = 4;  // no. of digits which make up the file index (e.g. img-0001.png)
 
@@ -145,16 +145,13 @@ int main(int argc, const char *argv[])
         bVis = true;
         if(bVis)
         {
-            show3DObjects((dataBuffer.end()-1)->boundingBoxes, cv::Size(4.0, 20.0), cv::Size(2000, 2000), true);
+            show3DObjects((dataBuffer.end()-1)->boundingBoxes, cv::Size(4.0, 20.0), cv::Size(1000, 1000), true);
         }
         bVis = false;
 
         cout << "#4 : CLUSTER LIDAR POINT CLOUD done" << endl;
         
         
-        // REMOVE THIS LINE BEFORE PROCEEDING WITH THE FINAL PROJECT
-        continue; // skips directly to the next image without processing what comes beneath
-
         /* DETECT IMAGE KEYPOINTS */
 
         // convert current image to grayscale
@@ -249,7 +246,7 @@ int main(int argc, const char *argv[])
             
             /* TRACK 3D OBJECT BOUNDING BOXES */
 
-            //// TODO: STUDENT ASSIGNMENT
+            //// STUDENT ASSIGNMENT
             //// TASK FP.1 -> match list of 3D objects (vector<BoundingBox>) between current and previous frame (implement ->matchBoundingBoxes)
             map<int, int> bbBestMatches;
             matchBoundingBoxes(matches, bbBestMatches, *(dataBuffer.end()-2), *(dataBuffer.end()-1)); // associate bounding boxes between current and previous frame using keypoint matches
@@ -288,13 +285,13 @@ int main(int argc, const char *argv[])
                 // compute TTC for current match
                 if( currBB->lidarPoints.size()>0 && prevBB->lidarPoints.size()>0 ) // only compute TTC if we have Lidar points
                 {
-                    //// TODO: STUDENT ASSIGNMENT
+                    //// STUDENT ASSIGNMENT
                     //// TASK FP.2 -> compute time-to-collision based on Lidar data (implement -> computeTTCLidar)
                     double ttcLidar; 
                     computeTTCLidar(prevBB->lidarPoints, currBB->lidarPoints, sensorFrameRate, ttcLidar);
                     //// EOF STUDENT ASSIGNMENT
 
-                    //// TODO: STUDENT ASSIGNMENT
+                    //// STUDENT ASSIGNMENT
                     //// TASK FP.3 -> assign enclosed keypoint matches to bounding box (implement -> clusterKptMatchesWithROI)
                     //// TASK FP.4 -> compute time-to-collision based on camera (implement -> computeTTCCamera)
                     double ttcCamera;
@@ -310,14 +307,15 @@ int main(int argc, const char *argv[])
                         cv::rectangle(visImg, cv::Point(currBB->roi.x, currBB->roi.y), cv::Point(currBB->roi.x + currBB->roi.width, currBB->roi.y + currBB->roi.height), cv::Scalar(0, 255, 0), 2);
                         
                         char str[200];
-                        sprintf(str, "TTC Lidar : %f s, TTC Camera : %f s", ttcLidar, ttcCamera);
+                        sprintf(str, "TTC Lidar : %.1f s, TTC Camera : %.1f s", ttcLidar, ttcCamera);
                         putText(visImg, str, cv::Point2f(80, 50), cv::FONT_HERSHEY_PLAIN, 2, cv::Scalar(0,0,255));
 
                         string windowName = "Final Results : TTC";
                         cv::namedWindow(windowName, 4);
                         cv::imshow(windowName, visImg);
-                        cout << "Press key to continue to next frame" << endl;
-                        cv::waitKey(0);
+                        cout << imgNumber.str() <<" - Press key to continue to next frame (ESC to abort)." << endl;
+                        if (cv::waitKey(0) == 27) // wait for key to be pressed.
+                            return -1;
                     }
                     bVis = false;
 
