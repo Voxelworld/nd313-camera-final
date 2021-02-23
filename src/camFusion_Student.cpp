@@ -108,9 +108,9 @@ void show3DObjects(std::vector<BoundingBox> &boundingBoxes, cv::Size worldSize, 
 
         // augment object with some key data
         char str1[200], str2[200];
-        sprintf(str1, "id=%d, #pts=%d", it1->boxID, (int)it1->lidarPoints.size());
+        sprintf_s(str1, "id=%d, #pts=%d", it1->boxID, (int)it1->lidarPoints.size());
         putText(topviewImg, str1, cv::Point2f(left-250, bottom+50), cv::FONT_ITALIC, 2, currColor);
-        sprintf(str2, "xmin=%2.2f m, yw=%2.2f m", xwmin, ywmax-ywmin);
+        sprintf_s(str2, "xmin=%2.2f m, yw=%2.2f m", xwmin, ywmax - ywmin);
         putText(topviewImg, str2, cv::Point2f(left-250, bottom+125), cv::FONT_ITALIC, 2, currColor);  
     }
 
@@ -135,7 +135,19 @@ void show3DObjects(std::vector<BoundingBox> &boundingBoxes, cv::Size worldSize, 
 }
 
 
-void ComputeMedianAbsoluteDeviation(std::vector<double>& x, double& median, double& mad)
+inline double sqr(double x) { return x*x; }
+
+void ComputeMeanStd(const std::vector<double> &x, double &mean, double &std)
+{
+    mean = std::accumulate(x.begin(), x.end(), 0.0) / x.size();
+    std = std::accumulate(x.begin(), x.end(), 0.0,
+                          [mean](double sum, double x) { return sum + sqr(x-mean); }
+    ) / x.size();
+    std = sqrt(std);
+    cout << "   Data mean=" << mean << " std=" << std << endl;
+}
+
+void ComputeMedianAbsoluteDeviation(std::vector<double> &x, double &median, double &mad)
 {
     // https://hausetutorials.netlify.app/posts/2019-10-07-outlier-detection-with-median-absolute-deviation/
     std::sort(x.begin(), x.end());
@@ -144,25 +156,14 @@ void ComputeMedianAbsoluteDeviation(std::vector<double>& x, double& median, doub
 
     // abs = |x_i - median(x)|
     std::vector<double> abs(x.size());
-    std::transform(x.begin(), x.end(), abs.begin(), [median](double x){ return fabs(x-median); });
+    std::transform(x.begin(), x.end(), abs.begin(), [median](double x) { return fabs(x - median); });
     std::sort(abs.begin(), abs.end());
-    mad = (abs.size() % 2 == 1) ? abs[n_2] : (abs[n_2-1] + abs[n_2]) / 2.0;
+    mad = (abs.size() % 2 == 1) ? abs[n_2] : (abs[n_2 - 1] + abs[n_2]) / 2.0;
     mad *= 1.4826;
-    cout << "Data median=" << median << " mad=" << mad << endl;
+    cout << "   Data median=" << median << " mad=" << mad << endl;
 }
 
-inline double sqr(double x) { return x*x; }
-void ComputeMeanStd(const std::vector<double> &x, double &mean, double &std)
-{
-    mean = std::accumulate(x.begin(), x.end(), 0.0) / x.size();
-    std = std::accumulate(x.begin(), x.end(), 0.0,
-                          [mean](double sum, double x) { return sum + sqr(x-mean); }
-    ) / x.size();
-    std = sqrt(std);
-    cout << "Data mean=" << mean << " std=" << std << endl;
-}
-
-// TODO: FP.3 : Associate Keypoint Correspondences with Bounding Box it contains.
+// FP.3 : Associate Keypoint Correspondences with Bounding Box it contains.
 //
 // Before a TTC estimate can be computed in the next exercise, you need to find all keypoint matches that belong to each 3D object.
 // You can do this by simply checking whether the corresponding keypoints are within the region of interest in the camera image.
@@ -184,7 +185,9 @@ void clusterKptMatchesWithROI(BoundingBox &boundingBox, std::vector<cv::KeyPoint
         }
     }
 
-    // TODO: Simple outlier removal by z-score, based on data mean/variance.
+#define Z_SCORE_TEST
+#ifdef Z_SCORE_TEST
+    // Simple outlier removal by z-score, based on data mean/variance.
     double mean, std;
     ComputeMeanStd(distances, mean, std);
     for (auto m : kptMatches)
@@ -199,12 +202,9 @@ void clusterKptMatchesWithROI(BoundingBox &boundingBox, std::vector<cv::KeyPoint
             }
         }
     }
-    cout << "Selected " << boundingBox.keypoints.size() << "/" << distances.size() << " points by z-score." << endl;
-
-    boundingBox.keypoints.clear();
-    boundingBox.kptMatches.clear();
-
-    // TODO: Outlier removal by Median Absolute Deviation (MAD).
+    cout << "Clustered " << boundingBox.keypoints.size() << "/" << distances.size() << " points by z-score." << endl;
+#else    
+    // Outlier removal by Median Absolute Deviation (MAD).
     // This is more robust than filtering using mean/variance of the data.
     // https://hausetutorials.netlify.app/posts/2019-10-07-outlier-detection-with-median-absolute-deviation/
     double median, mad;
@@ -222,7 +222,8 @@ void clusterKptMatchesWithROI(BoundingBox &boundingBox, std::vector<cv::KeyPoint
             }
         }
     }
-    cout << "Selected " << boundingBox.keypoints.size() << "/" << distances.size() << " points by MAD." << endl;
+    cout << "Clustered " << boundingBox.keypoints.size() << "/" << distances.size() << " points by MAD." << endl;
+#endif
 }
 
 // FP.4 : Compute Camera-based time-to-collision (TTC) based on keypoint correspondences in successive images.
@@ -314,15 +315,23 @@ void computeTTCLidar(std::vector<LidarPoint> & lidarPointsPrev, std::vector<Lida
     // Lesson 3.2: Estimating TTC with Lidar
     // https://classroom.udacity.com/nanodegrees/nd313/parts/1971021c-523b-414c-93a3-2c6297cf4771/modules/3eb3ecc3-b73d-43bb-b565-dcdd5d7a2635/lessons/dfe71db5-4233-4e4f-b33f-40cb9899dc13/concepts/c78c2068-ff3b-4146-9f1f-77ea44188ef2
 
-    // More robust x-min point selection by using 5%-30% quantile (see top view: single noisy points)
+#define ROBUST_LIDAR
+#ifdef ROBUST_LIDAR
+    // More robust x-min point selection by using 5%-30% quantile to remove single noisy points (see top view)
     double quantileMin = 0.05;
     double quantileMax = 0.30;
     double minXPrev = computeMeanInQuantile(lidarPointsPrev, quantileMin, quantileMax);
     double minXCurr = computeMeanInQuantile(lidarPointsCurr, quantileMin, quantileMax);
+#else
+    // Naive selection of nearest point
+    double minXPrev = std::min_element(lidarPointsPrev.begin(), lidarPointsPrev.end(), [&](const LidarPoint &a, const LidarPoint &b) { return a.x < b.x; })->x;
+    double minXCurr = std::min_element(lidarPointsCurr.begin(), lidarPointsCurr.end(), [&](const LidarPoint &a, const LidarPoint &b) { return a.x < b.x; })->x;
+#endif
 
     // compute TTC from both measurements
     double dT = 1.0 / frameRate; // time between two measurements in seconds
     TTC = minXCurr * dT / (minXPrev - minXCurr);
+    cout << "TTC lidar: delta x scale factor is " << (1.0 / (minXPrev - minXCurr)) << ", TTC=" << TTC << endl;
 }
 
 // FP.1 : Match 3D Objects
