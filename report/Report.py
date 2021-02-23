@@ -123,10 +123,19 @@
 # The computation of the mean X quantile is implemented in the helper method `computeMeanInQuantile`.
 #
 #
-# An alternative solution may be to remove outliers fist, e.g. using the mean/variance of the x distribution, instead of using a fixed portion of the data.
+# An alternative solution may be to remove outliers fist, e.g. using the mean/variance of the x distribution, instead of using a fixed portion of the data. Additional filtering  using a-priori knowledge like a predefined lane width as discussed in lesson 3.2 ["Estimating TTC with Lidar"](https://classroom.udacity.com/nanodegrees/nd313/parts/1971021c-523b-414c-93a3-2c6297cf4771/modules/3eb3ecc3-b73d-43bb-b565-dcdd5d7a2635/lessons/dfe71db5-4233-4e4f-b33f-40cb9899dc13/concepts/c78c2068-ff3b-4146-9f1f-77ea44188ef2) may be useful.
 
 # %% [markdown]
 # # Compute Camera-based TTC
+#
+# The YOLO object detector has extracted a number of bounding boxes for the different objects in the scene:
+#
+# <img src="report-YOLO-classification.png" />
+#
+# The $TTC_{camera}$ computation is done for each object in two steps:
+#  1. All enclosed keypoint matches are assigned to the bounding box (FP.3)
+#  2. Time-to-collision is computed based on the keypoints in a box (FP.4)
+#
 #
 # ## FP.3 : Associate Keypoint Correspondences with Bounding Boxes
 #
@@ -136,8 +145,38 @@
 #
 # ### Solution
 #
-# <img src="report-YOLO-classification.png" width="500">
+# Code in method `clusterKptMatchesWithROI`.
 #
+# Typically all matches on an object at a certain distance from the camera should have a similar direction vector, e.g. a radial optical flow field when approaching a target in front. Therefore the length of this vectors (distances) should be similar.
+#
+# To filter out mismatches, euclidean distances are computed:
+# ```C++
+# vector<double> distances;
+# for (auto m : kptMatches)
+#     if (boundingBox.roi.contains(kptsCurr[m.trainIdx].pt)) 
+#         double d = cv::norm(kptsCurr[m.trainIdx].pt - kptsPrev[m.queryIdx].pt); // L2
+#         distances.push_back(d);
+# ```
+# and outliers are discarded by a *z-score test*, a test which removes candidates with a distance outside the typical range (defined by mean/variance of the data):
+# ```C++
+#     ComputeMeanStd(distances, mean, std);
+#     for (auto m : kptMatches)
+#         ...
+#         if (fabs(d - mean) <= 3 * std) // 99.7% of normal distribution
+#         {
+#             boundingBox.kptMatches.push_back(m);
+# ```
+#
+# Outlier removal by [Median Absolute Deviation (MAD)](https://hausetutorials.netlify.app/posts/2019-10-07-outlier-detection-with-median-absolute-deviation) has also been implemented, which in theory is more robust to outliers than the z-score filtering. However, given the data, it doesn't make much difference. 
+#
+# ```C++
+#     ComputeMedianAbsoluteDeviation(distances, median, mad);
+#     for (auto m : kptMatches)
+#         ...
+#         if (fabs(dist - median) <= 5 * mad)
+#         {
+#             boundingBox.kptMatches.push_back(m);
+# ```
 
 # %% [markdown]
 # ## FP.4 : Compute Camera-based TTC
@@ -148,7 +187,18 @@
 #
 # ### Solution (see Lesson 3.3)
 #
-# TODO: ...
+# Code in method `computeTTCCamera`.
+#
+# The code is based on the exercise in lesson 3.3 ["Estimating TTC with Camera"](https://classroom.udacity.com/nanodegrees/nd313/parts/1971021c-523b-414c-93a3-2c6297cf4771/modules/3eb3ecc3-b73d-43bb-b565-dcdd5d7a2635/lessons/dfe71db5-4233-4e4f-b33f-40cb9899dc13/concepts/daceaff3-1519-4f4c-82ff-16e02b5c2e8f), the mean distance ratio of all keypoint matches is used to estimate the TTC.
+#
+# ```C++
+# std::sort(distRatios.begin(), distRatios.end());
+# int n_2 = int(distRatios.size() / 2);
+# double medianDistRatio = distRatios.size()%2==1 ? 
+#        distRatios[n_2] : (distRatios[n_2-1]+dRatios[n_2])/2;
+#
+# TTC = -dT / (1 - medianDistRatio);
+# ```
 
 # %% [markdown]
 # # Performance Evaluation
@@ -177,7 +227,7 @@
 #
 # ### Solution
 #
-# #### Example 1
+# #### LIDAR Example 1
 #
 # Obviously, the $TT_{lidar}$ computation in the back course of the timeline plot is no longer correct (Frame #52 and above).
 # This can be explained by the fact that the car is stationary and therefore the TTC is infinite.
@@ -188,7 +238,7 @@
 # Since the ego motion is known in a real world szenario, this case can be easily recognized. 
 
 # %% [markdown]
-# #### Example 2
+# #### LIDAR Example 2
 #
 # Another artifact can be observed in image pair 2/3 (first lidar peak). The $TT_{lidar}$ estimation is 22 sec and way of from the camera measurement and and from neighboring measurements.
 #
@@ -201,7 +251,7 @@
 # <img src="report-lidar-2x3-camera.png" width=600/>
 
 # %% [markdown]
-# #### Example 3
+# #### LIDAR Example 3
 #
 # The following two plots show other lidar measurements artifacts which are successfully filtered.
 #
@@ -214,7 +264,7 @@
 # <img src="report-lidar-27-mirror.png" width=400 />
 
 # %% [markdown]
-# #### Example 4
+# #### LIDAR Example 4
 #
 # Starting with Frame #48 the system reports other incorrect TTC lidar measurements. From this point the YOLO rectangle of the truck intersects with the rectangle of the car and some of the cropped lidar points are also assigned to the bounding box of the truck, which triggers the TTC computation.
 #
@@ -253,7 +303,7 @@ import matplotlib.pyplot as plt
 # %%
 tables = {}
 
-for file in Path("../build").glob("**/*.csv"):
+for file in Path(".").glob("*.csv"): # "../build"
     
     # split 'run.AKAZE.AKAZE.csv'
     detector, descriptor = file.name.split(".")[1:3]
@@ -307,7 +357,7 @@ plot_ttc(all_keys, ylim=(0,35))
 #
 # $$ MAE = \frac{1}{\#frames} \sum_{frames}{|TTC_{lidar} - TTC_{camera}|} $$
 #
-#  2. Another expectation about the series of $TTC_{camera}$ measurements is the smoothness of the curve. With constant breaking of the car, the values should not jump back and forth too much. A simple measure for this is the Mean Absolute Difference (MAD) of successive measurements:
+#  2. Another expectation about the series of $TTC_{camera}$ measurements is the smoothness of the curve. With constant breaking of the car, the values should not jump back and forth too much. A simple measure for this is the Mean Absolute Differences (MAD) of successive measurements:
 #
 # $$ MAD = \frac{1}{\#frames-1} \sum_{frames}{|TTC_{camera}(frame_{i+1}) - TTC_{camera}(frame_i) |} $$
 #
@@ -355,24 +405,37 @@ worst_keys = [(row["Detector"], row["Descriptor"]) for i,row in df[-5:].iterrows
 plot_ttc(worst_keys)
 
 # %% [markdown]
-# TODO: ... also include several examples where camera-based TTC estimation is way off. As with Lidar, describe your observations again and also look into potential reasons. This is the last task in the final project.
-
-# %%
-
-# %%
-
-# %%
-
-# %%
-
-# %%
-
-# %%
-
-# %%
+# Let's have a look at a few examples where camera-based TTC estimation is way off.
+#
+# #### Camera Example 1
+#
+# (HARRIS, BRISK) green curve shows a peak at frame #22, measuring a TTC of more than 122 seconds.
+#
+# <img src="ttc_camera-22-wrong_car.png" width=810 />
+#
+# There are only 8 matches found inside the box, and 3 of them are on cars further away. Since none of the pairs were classified as outliers, the mean keypoint distance is strongly influenced by other cars.
 
 # %% [markdown]
-# # Appendix A: Generation of figure in FP.5 (LIDAR based TTC)
+# #### Camera Example 2
+#
+# Same in (ORB, BRISK) purple curve at frame #33, TTC is ~180.
+#
+# <img src="ttc_camera-33-wrong_car.png" width=810 />
+
+# %% [markdown]
+# #### Camera Example 3
+#
+# Another observation in (ORB, BRISK) are many mission values, caused by a TTC of $\infty$, because in these frames non of the distances has changed, and therefore the denominator in the TTC formular $(1 - d_{curr}/d_{prev})$ is zero.
+#
+#
+
+# %% [markdown]
+# #### General Observations
+#
+# This is related to a general problem: The **distances of all the matches are very small**. Mostly 0, 1 or sqrt(2) pixel. To get more reliable measurements the frame rate should be reduced or the camera resolution should be increased.
+
+# %% [markdown]
+# # Appendix A: Generation of figure in FP.5 
 #
 # To analyse the full sequence the detection results of the truck has to be removed. This can be done by filtering the object class (car: 2 vs. truck: 7) provided by the YOLO detector.
 #
@@ -400,7 +463,9 @@ plt.minorticks_on()
 plt.show()
 
 # %% [markdown]
-# # Appendix B: Generated video sequence (animated GIF)
+# # Appendix B: Generation of video sequence
+#
+# Animated GIF:
 
 # %%
 #https://pythonprogramming.altervista.org/png-to-gif
@@ -412,7 +477,7 @@ duration = 1000 / hz # display duration of each frame [ms]
 source_size = (1242, 375)
 target_size = (np.array(source_size)/3).astype(np.int)
 
-imgs = Path("./images/KITTI/2011_09_26/image_02/data").glob("*.png")
+imgs = Path("../images/KITTI/2011_09_26/image_02/data").glob("*.png")
 
 # Create the frames
 frames = []
@@ -423,7 +488,7 @@ for i, file in enumerate(imgs):
     frames.append(img)
     
 # Save into a GIF file that loops forever
-frames[0].save('./images/kitty-sequence.gif', format='GIF', 
+frames[0].save('kitty-sequence.gif', format='GIF', 
                append_images=frames[1:], save_all=True, duration=duration, loop=0)
 
 # %% [markdown]
