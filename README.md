@@ -36,4 +36,4 @@ In this final project, you will implement the missing parts in the schematic. To
 
 # Student Solution
 
-See [Report](report/Report.md).
+See [Report](report/README.md).
