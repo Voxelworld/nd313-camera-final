@@ -128,15 +128,15 @@
 # %% [markdown]
 # # Compute Camera-based TTC
 #
-# The YOLO object detector has extracted a number of bounding boxes for the different objects in the scene:
+# The YOLO object detector has extracted a number of bounding boxes for the different objects in the scene. This includes a class label and a confidence value.
 #
 # <img src="report-YOLO-classification.png" />
 #
 # The $TTC_{camera}$ computation is done for each object in two steps:
 #  1. All enclosed keypoint matches are assigned to the bounding box (FP.3)
 #  2. Time-to-collision is computed based on the keypoints in a box (FP.4)
-#
-#
+
+# %% [markdown]
 # ## FP.3 : Associate Keypoint Correspondences with Bounding Boxes
 #
 # ### Task
@@ -299,16 +299,19 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 # %matplotlib inline
+import seaborn as sns
+cm = sns.light_palette("red", as_cmap=True)
 
 # %%
 tables = {}
 
-for file in Path(".").glob("*.csv"): # "../build"
+#for file in Path("./runs.local").glob("*.csv"):
+for file in Path("./runs.udacity").glob("*.csv"):
     
     # split 'run.AKAZE.AKAZE.csv'
     detector, descriptor = file.name.split(".")[1:3]
 
-    df = pd.read_csv(file, sep=",", na_values=["inf","nan(ind)","-nan(ind)"])
+    df = pd.read_csv(file, sep=",", na_values=["-inf","inf","nan(ind)","-nan(ind)"])
     df.set_index("image", inplace=True)
     tables[(detector, descriptor)] = df
     
@@ -342,7 +345,7 @@ def plot_ttc(keys, ylim=None):
     plt.grid(which="major", linestyle='-')
     plt.grid(which="minor", linestyle=':', color="gray")
     plt.minorticks_on()
-    plt.legend()
+    plt.legend(loc="upper right")
     plt.show()
 
 all_keys = tables.keys()
@@ -383,33 +386,42 @@ for (detector, descriptor) in tables.keys():
     table["MAD"].append(mad)
 
 df = pd.DataFrame(table).sort_values(by="MAE").reset_index(drop=True)
-df
-
-# %% [markdown]
-# Interestingly, one can observe in the table, that the ranking of the MAE metric more or less corresponds to the ranking of the MAD metric.
-
-# %% [markdown]
-# #### Top 3 combinations (both metrics)
+df.style.set_caption('Combinations ranked by Mean Absolute Error (MAE)').background_gradient(cmap=cm)
 
 # %%
-best_keys = [(row["Detector"], row["Descriptor"]) for i,row in df[:3].iterrows()]
-
-plot_ttc(best_keys)
+df = pd.DataFrame(table).sort_values(by="MAD").reset_index(drop=True)
+df.style.set_caption('Combination ranked Mean Absolute Differences (MAD)').background_gradient(cmap=cm)
 
 # %% [markdown]
-# #### Worst combinations (based on MAE metric)
+# #### Top 3 combinations (MAD metric)
 
 # %%
-worst_keys = [(row["Detector"], row["Descriptor"]) for i,row in df[-5:].iterrows()]
+best_combinations = [(row["Detector"], row["Descriptor"]) for i,row in df[:3].iterrows()]
 
-plot_ttc(worst_keys)
+plot_ttc(best_combinations)
 
 # %% [markdown]
-# Let's have a look at a few examples where camera-based TTC estimation is way off.
-#
+# #### Worst 5 combinations (both metrics)
+
+# %%
+worst_combinations = [(row["Detector"], row["Descriptor"]) for i,row in df[-5:].iterrows()]
+
+plot_ttc(worst_combinations, ylim=(-100,300))
+
+# %% [markdown]
+# Let's have a look at a few examples where camera-based TTC estimation is way off:
+
+# %%
+selected_combinations = (
+    ("HARRIS", "BRISK"), 
+    ("ORB", "BRISK"),
+)
+plot_ttc(selected_combinations, ylim=(-200,200))
+
+# %% [markdown]
 # #### Camera Example 1
 #
-# (HARRIS, BRISK) green curve shows a peak at frame #22, measuring a TTC of more than 122 seconds.
+# The (HARRIS, BRISK) curve shows a peak at frame #22, measuring a TTC of more than 122 seconds.
 #
 # <img src="ttc_camera-22-wrong_car.png" width=810 />
 #
@@ -418,7 +430,7 @@ plot_ttc(worst_keys)
 # %% [markdown]
 # #### Camera Example 2
 #
-# Same in (ORB, BRISK) purple curve at frame #33, TTC is ~180.
+# Same in (ORB, BRISK) curve at frame #33, TTC is ~180.
 #
 # <img src="ttc_camera-33-wrong_car.png" width=810 />
 
@@ -426,13 +438,11 @@ plot_ttc(worst_keys)
 # #### Camera Example 3
 #
 # Another observation in (ORB, BRISK) are many mission values, caused by a TTC of $\infty$, because in these frames non of the distances has changed, and therefore the denominator in the TTC formular $(1 - d_{curr}/d_{prev})$ is zero.
-#
-#
 
 # %% [markdown]
 # #### General Observations
 #
-# This is related to a general problem: The **distances of all the matches are very small**. Mostly 0, 1 or sqrt(2) pixel. To get more reliable measurements the frame rate should be reduced or the camera resolution should be increased.
+# This is related to a general problem: The **distances of all the matches are very small**. Mostly 0, 1 or sqrt(2) pixel. To get more reliable measurements the frame rate should be reduced (e.g. via `imgStepWidth`) or the camera resolution should be increased.
 
 # %% [markdown]
 # # Appendix A: Generation of figure in FP.5 
