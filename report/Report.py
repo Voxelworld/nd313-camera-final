@@ -386,11 +386,13 @@ for (detector, descriptor) in tables.keys():
     table["MAD"].append(mad)
 
 df = pd.DataFrame(table).sort_values(by="MAE").reset_index(drop=True)
-df.style.set_caption('Combinations ranked by Mean Absolute Error (MAE)').background_gradient(cmap=cm)
+#df.style.set_caption('Combinations ranked by Mean Absolute Error (MAE)').background_gradient(cmap=cm)
+df
 
 # %%
 df = pd.DataFrame(table).sort_values(by="MAD").reset_index(drop=True)
-df.style.set_caption('Combination ranked Mean Absolute Differences (MAD)').background_gradient(cmap=cm)
+#df.style.set_caption('Combination ranked Mean Absolute Differences (MAD)').background_gradient(cmap=cm)
+df
 
 # %% [markdown]
 # #### Top 3 combinations (MAD metric)
